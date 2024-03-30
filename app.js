@@ -1,22 +1,107 @@
+var redirect_uri = "https://pilkeysp.github.io/spotdle/";
 
+var client_id = "ad9e2448e561421f85168ef08835bb58"; 
+var client_secret = "d1cc2c415e1b47f892808c1801db3f93";
 
-const getToken = async () => {
-    const token = 'BQBF7IYAgBHe9-Akf6IVROk_lmmGYWWZboIb9dp-0OvVS-mzzTBVtAT9zp75xdruPPXTVDnrB-CZrYuRYbB7MxLjwCXxaLQ29OBgcUT2zOZZo2eromxKW3wsVEiw7vzqdKuFAX8_YSbnX4Ahmnb9pDso7zSXnsagHTybXoHCIhQ-1bNd1r6lvJuPQfvjRSVbFUKaut1fyCQg28Ut5S31jGKE0Jdr9ysBZ3Kgbdo_36d73rckndnR9ck2Qrf6qGgwDxRQE76AiyBd_t90r7AG3U61';
-    return token;
+var access_token = null;
+var refresh_token = null;
+
+const AUTHORIZE = "https://accounts.spotify.com/authorize"
+const TOKEN = "https://accounts.spotify.com/api/token";
+
+function onPageLoad(){
+    if ( window.location.search.length > 0 ){
+        handleRedirect();
+    }
+    else{
+        access_token = localStorage.getItem("access_token");
+        
+        if (access_token == null) requestAuthorization();
+        else init();
+    }
 }
 
-const getSongs = async (token) => {
-
-    //const result = await fetch(`https://api.spotify.com/v1/browse/categories?locale=sv_US`, {
-    const result = await fetch(`https://api.spotify.com/v1/me/top/tracks?time_range=short_term&limit=50&offset=0`, {
-        method: 'GET',
-        headers: { 'Authorization' : 'Bearer ' + token}
-    });
-
-    const data = await result.json();
-    console.log(data);
-    return data.items;
+function init() {
+    const TOPTRACK = "https://api.spotify.com/v1/me/top/tracks?time_range=short_term&limit=50&offset=0";
+    callApi( "GET", TOPTRACK, null, initGame);
 }
+
+function handleRedirect(){
+    let code = getCode();
+    fetchAccessToken( code );
+    window.history.pushState("", "", redirect_uri); // remove paramater from url
+}
+
+function getCode(){
+    let code = null;
+    const queryString = window.location.search;
+    if ( queryString.length > 0 ){
+        const urlParams = new URLSearchParams(queryString);
+        code = urlParams.get('code')
+    }
+    return code;
+}
+
+function requestAuthorization(){
+    localStorage.setItem("client_id", client_id);
+    localStorage.setItem("client_secret", client_secret);
+
+    let url = AUTHORIZE;
+    url += "?client_id=" + client_id;
+    url += "&response_type=code";
+    url += "&redirect_uri=" + encodeURI(redirect_uri);
+    url += "&show_dialog=true";
+    url += "&scope=user-top-read";
+    window.location.href = url;
+}
+
+function fetchAccessToken( code ){
+    let body = "grant_type=authorization_code";
+    body += "&code=" + code; 
+    body += "&redirect_uri=" + encodeURI(redirect_uri);
+    body += "&client_id=" + client_id;
+    body += "&client_secret=" + client_secret;
+    callAuthorizationApi(body);
+}
+
+function callAuthorizationApi(body){
+    let xhr = new XMLHttpRequest();
+    xhr.open("POST", TOKEN, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.setRequestHeader('Authorization', 'Basic ' + btoa(client_id + ":" + client_secret));
+    xhr.send(body);
+    xhr.onload = handleAuthorizationResponse;
+}
+
+function handleAuthorizationResponse(){
+    if ( this.status == 200 ){
+        var data = JSON.parse(this.responseText);
+        if ( data.access_token != undefined ){
+            access_token = data.access_token;
+            localStorage.setItem("access_token", access_token);
+        }
+        if ( data.refresh_token  != undefined ){
+            refresh_token = data.refresh_token;
+            localStorage.setItem("refresh_token", refresh_token);
+        }
+        onPageLoad();
+    }
+    else {
+        console.log(this.responseText);
+        alert(this.responseText);
+    }
+}
+
+function callApi(method, url, body, callback){
+    let xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('Authorization', 'Bearer ' + access_token);
+    xhr.send(body);
+    xhr.onload = callback;
+}
+
+//-----------
 
 class LetterColours {
     static CORRECT = getComputedStyle(document.documentElement).getPropertyValue('--green');
@@ -63,41 +148,45 @@ class RevealButton {
     }
 }
 
-class RemoveableButton {
-    constructor(text, container) {
-        this.text = text;
+class FlipButton {
+    constructor(firstText, secondText, container) {
+        this.firstText = firstText;
+        this.secondText = secondText;
         this.container = container;
         this.active = false;
+        this.firstState = true;
 
         this.button = document.createElement('button');
         this.button.className = "animated-button green-button";
 
         this.buttonTextSpan = document.createElement("span");
-        this.buttonTextSpan.textContent = this.text;
+        this.buttonTextSpan.textContent = this.firstText;
         this.button.appendChild(this.buttonTextSpan);
         this.buttonEffectSpan = document.createElement("span");
         this.button.appendChild(this.buttonEffectSpan);
 
-        this.button.addEventListener("click", function() {
-            initGame();
+        this.container.appendChild(this.button);
+
+        this.button.addEventListener("click", () => {
+            if (this.firstState) {
+                endText.lose(fullWord);
+                this.toSecondState();
+                activeGame = false;
+            } else init();
         });
     }
 
-    remove() {
-        if (this.active) {
-            this.container.removeChild(this.button);
-            this.active = false;
-        }
+    toFirstState() {
+        this.button.className = "animated-button red-button";
+        this.buttonTextSpan.textContent = this.firstText;
+        this.firstState = true;
     }
 
-    add() {
-        if (!this.active) {
-            this.container.appendChild(this.button);
-            this.active = true;
-        }
+    toSecondState() {
+        this.button.className = "animated-button green-button";
+        this.buttonTextSpan.textContent = this.secondText;
+        this.firstState = false;
     }
-
-
 }
 
 class GuessContainer {
@@ -164,12 +253,10 @@ class WordRow {
             item.id = "item" + i;
 
             if (specialString[i] !== '~') {
-                //beans
                 const numberRegex = /^[0-9]$/;
                 if (numberRegex.test(specialString[i])) {
                     item.style.borderWidth = '5px';
                     item.style.borderStyle = 'solid';
-                    // item.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--blue');
                     item.style.borderColor = LetterColours.BORDER;
 
                 } else {
@@ -188,11 +275,9 @@ class WordRow {
     }
 
     update(guess) {
-        for (let i = 0; i < wordOfTheDay.length; ++i) {
+        for (let i = 0; i < cleanedWord.length; ++i) {
             var tileContent = guess[i];
             if (guess[i] == undefined) tileContent = " ";
-
-            // let textSpan = this.row.children[idxArr[i]].querySelector('span');
             this.row.children[idxArr[i]].textContent = tileContent;
         }
     }
@@ -200,12 +285,75 @@ class WordRow {
 
 class KeyboardKey {
     constructor(letter) {
+        this.letter = letter;
         this.div = document.createElement('div');
         this.div.textContent = letter;
         this.div.id = letter + "Key";
         this.div.className = "letter";
         this.status = ColourStatus.GREY;
+
+        this.div.addEventListener("click", () => {
+           inputKey(this.letter);
+        });
     }
+
+    reset() {
+        this.div.style.color = LetterColours.BLANK;
+        this.status = ColourStatus.GREY;
+        console.log(this.letter);
+    }
+}
+
+class EndText {
+    constructor(container) {
+        this.container = container;
+        this.topText = "";
+        this.bottomText = "";
+        this.active = false;
+
+        this.div = document.createElement('div');
+        this.div.className = "end-container";
+
+        this.topSpan = document.createElement("span");
+        this.topSpan.textContent = this.topText;
+        this.div.appendChild(this.topSpan);
+
+        this.bottomSpan = document.createElement("span");
+        this.bottomSpan.textContent = this.bottomText;
+        this.div.appendChild(this.bottomSpan);
+    }
+
+    win(correctSong) {
+        this.topSpan.textContent = "YOU WON";
+        this.bottomSpan.textContent = "THE SONG WAS: " + correctSong;
+        this.topSpan.className = "end-text-green";
+        this.bottomSpan.className = "end-text-green";
+        this.add();
+    }
+
+    lose(correctSong) {
+        this.topSpan.textContent = "YOU LOST";
+        this.bottomSpan.textContent = "THE SONG WAS: " + correctSong;
+        this.topSpan.className = "end-text-red";
+        this.bottomSpan.className = "end-text-red";
+        this.add();
+    }
+
+    remove() {
+        if (this.active) {
+            this.container.removeChild(this.div);
+            this.active = false;
+        }
+    }
+
+    add() {
+        if (!this.active) {
+            this.container.appendChild(this.div);
+            this.active = true;
+        }
+    }
+
+
 }
 
 function cleanString(str) {
@@ -227,9 +375,7 @@ function cleanString(str) {
         }
     }
 
-    console.log("SPECIAL: " + specialCharString);
-
-    wordOfTheDay = cleanedStr;
+    cleanedWord = cleanedStr;
     return indexes;
 }
 
@@ -274,20 +420,15 @@ function submitGuess(word, guess) {
         } else sequence[i] = LetterColours.INCORRECT;
     }
 
-    //addNewRow(sequence, guess);
     guessContainer.submit(sequence);
     updateKeyboard(sequence, guess);
 
     ++guessCounter;
     if (guess === word || guessCounter >= 5) {
-        let endReason = (guess === word)? "YOU WON" : "YOU LOST";
-        let endText = document.createElement("div");
-        endText.className = "end-text";
-        endText.id = "endText";
-        endText.textContent = endReason + " IN " + guessCounter + ((guessCounter === 1)? " GUESS" : " GUESSES");
-        document.body.appendChild(endText);
+        if (guess === word) endText.win(fullWord);
+        else endText.lose(fullWord);
 
-        restartButton.add();
+        restartButton.toSecondState();
 
         activeGame = false;
     }
@@ -306,12 +447,10 @@ function updateKeyboard(seq, guess) {
 
         if (keyObj.status !== ColourStatus.GREEN
             && keyObj.status !== ColourStatus.YELLOW) {
-                // keyObj.div.style.backgroundColor = seq[i];
                 keyObj.div.style.color = seq[i];
                 keyObj.status = newStatus;
         } else if (keyObj.status === ColourStatus.YELLOW
             && seq[i] === LetterColours.CORRECT) {
-                // keyObj.div.style.backgroundColor = seq[i];
                 keyObj.div.style.color = seq[i];
                 keyObj.status = newStatus;
         }
@@ -321,76 +460,71 @@ function updateKeyboard(seq, guess) {
 //EVENT LISTENER
 document.addEventListener('keydown', function(event) {
     const key = event.key;
+    inputKey(key);
+});
 
+function inputKey(key) {
     if (!activeGame) return;
 
     if (/^[a-zA-Z0-9]$/.test(key)) {
-        if (currentGuess.length < wordOfTheDay.length) currentGuess += key.toUpperCase();
+        if (currentGuess.length < cleanedWord.length) currentGuess += key.toUpperCase();
     } else if (key === 'Backspace') {
         if (currentGuess.length > 0) currentGuess = currentGuess.slice(0, -1);
     } else if (key === 'Enter') {
-        if (currentGuess.length === wordOfTheDay.length) submitGuess(wordOfTheDay, currentGuess);
+        if (currentGuess.length === cleanedWord.length) submitGuess(cleanedWord, currentGuess);
     }
     guessContainer.updateRow(currentGuess);
-
-});
-
+}
 
 function initGame() {
-    
 
-    getRdmSong().then(song => {
-        wordOfTheDay = song.name.toUpperCase();
-        console.log(wordOfTheDay);
-        //INSERT TEST WORD
-        // wordOfTheDay = "THE E4R(";
+    if ( this.status == 200 ){
+        var data = JSON.parse(this.responseText);
+    }
+    else if ( this.status == 401 ){
+        refreshAccessToken()
+        return;
+    }
+    else {
+        alert(this.responseText);
+        return;
+    }
 
-        wordLen = wordOfTheDay.length;
+    let topSongs = data.items;
+    let song = topSongs[Math.floor(Math.random() * topSongs.length)];
 
-        idxArr = cleanString(wordOfTheDay);
+    fullWord = song.name.toUpperCase();
 
-        console.log("HERE: " + wordOfTheDay);
+    cleanedWord = fullWord;
 
-        guessContainer.initializeRows(wordLen, specialCharString);
+    wordLen = cleanedWord.length;
 
-        artistDiv.afterText = song.artists[0].name;
-        albumDiv.afterText = song.album.name;
-        artistDiv.resetState();
-        albumDiv.resetState();
+    idxArr = cleanString(cleanedWord);
 
-        activeGame = true;
-    });
+    guessContainer.initializeRows(wordLen, specialCharString);
 
-    //reset the keyboard colours
+    artistDiv.afterText = song.artists[0].name;
+    albumDiv.afterText = song.album.name;
+    artistDiv.resetState();
+    albumDiv.resetState();
+
+    activeGame = true;
+
     let keys = "1234567890QWERTYUIOPASDFGHJKLZXCVBNM";
     for (let i = 0; i < keys.length; ++i) {
-        document.getElementById(keys[i] + "Key").style.color = LetterColours.BLANK;
+        console.log(keyboardKeys);
+        keyboardKeys[keys[i]].reset();
     }
 
     currentGuess = "";
     guessCounter = 0;
     activeGame = true;
-    let endText = document.getElementById("endText");
-    if (document.getElementById("endText")) document.body.removeChild(endText);
 
-    let songReveal = document.getElementById("songRevealDiv");
-    if (document.getElementById("songRevealDiv")) document.body.removeChild(songReveal);
-
-    restartButton.remove();
+    endText.remove();
+    restartButton.toFirstState();
 }
 
-async function getRdmSong() {
-
-    const token = await getToken();
-
-    var topSongs = await getSongs(token);
-
-    let song = topSongs[Math.floor(Math.random() * topSongs.length)];
-    console.log(song.artists);
-    return song;
-
-}
-
+//--------
 
 var hintContainer = document.getElementById("hintsContainer");
 
@@ -399,14 +533,16 @@ var guessCounter;
 var activeGame;
 var idxArr;
 
-let wordOfTheDay;
+let cleanedWord;
+let fullWord;
 let specialCharString;
 let wordLen;
 
 let guessContainer = new GuessContainer(5);
 let artistDiv = new RevealButton("ARTIST HINT", "placeholder", hintContainer, "blue-button");
 let albumDiv = new RevealButton("ALBUM HINT", "placeholder", hintContainer, "blue-button");
-let restartButton = new RemoveableButton("PLAY AGAIN", hintContainer);
+let restartButton = new FlipButton("GIVE UP", "PLAY AGAIN", hintContainer);
+let endText = new EndText(document.body);
 
 let keyboardKeys = [];
 
@@ -415,5 +551,3 @@ generateRow("QWERTYUIOP", document.getElementById("topRow"), keyboardKeys);
 generateRow("ASDFGHJKL", document.getElementById("middleRow"), keyboardKeys);
 generateRow("ZXCVBNM", document.getElementById("bottomRow"), keyboardKeys);
 
-initGame();
-restartButton.add();
